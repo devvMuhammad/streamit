@@ -31,7 +31,10 @@
 		else if (Hls.isSupported()) {
 			const hls = new Hls({
 				debug: false,
-				enableWorker: true
+				enableWorker: true,
+				maxBufferSize: 10 * 1000 * 1000,
+				lowLatencyMode: true,
+				startFragPrefetch: true
 			});
 
 			hls.loadSource(streamUrl);
