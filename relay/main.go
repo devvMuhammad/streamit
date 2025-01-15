@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -12,6 +14,19 @@ import (
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
+
+type StreamerMetadata struct {
+	UserId      string    `json:"userId"`
+	Tags        []string  `json:"tags"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Active      bool      `json:"active"`
+	LastActive  bool      `json:"lastActive"`
+}
+
+// global variable for ongoing streams
+var streams = make(map[string]StreamerMetadata)
 
 func main() {
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -21,16 +36,17 @@ func main() {
 			return
 		}
 		defer wsConn.Close()
-
 		// Start FFmpeg process
 		ffmpegCmd := exec.Command("ffmpeg",
 			"-f", "webm",
 			"-i", "pipe:0",
 			"-c:v", "libx264",
-			"-preset", "veryfast",
+			"-preset", "medium",
 			"-tune", "zerolatency",
 			"-c:a", "aac",
 			"-ar", "44100",
+			"-fflags", "nobuffer",
+			"-rtbufsize", "1500M",
 			"-b:a", "128k",
 			"-pix_fmt", "yuv420p",
 			"-f", "flv",
@@ -39,6 +55,13 @@ func main() {
 		ffmpegCmd.Stderr = os.Stderr
 
 		ffmpegIn, err := ffmpegCmd.StdinPipe()
+
+		defer func() {
+			ffmpegIn.Close()
+			ffmpegCmd.Process.Kill()
+			ffmpegCmd.Wait()
+		}()
+
 		if err != nil {
 			log.Println("Failed creating pipe:", err)
 			return
@@ -57,14 +80,42 @@ func main() {
 				return
 			}
 
-			// Only process binary messages
+			// Binary message means it is for streaming
 			if messageType == websocket.BinaryMessage {
 				if _, err := ffmpegIn.Write(data); err != nil {
 					log.Println("Pipe write error:", err)
 					wsConn.Close()
-					break
+					return
 				}
+
+				continue
 			}
+
+			// If not binary, assume it is a JSON message so unmarshal it
+			var requestData struct {
+				Type string      `json:"type"`
+				Data interface{} `json:"data"`
+			}
+
+			if err := json.Unmarshal(data, &requestData); err != nil {
+				log.Println("Unmarshal JSON error:", err)
+				continue
+			}
+
+			if requestData.Type == "start" {
+
+				// add to the hashmap
+				streamerMetadata := requestData.Data.(StreamerMetadata)
+
+				streams[streamerMetadata.UserId] = streamerMetadata
+
+			} else if requestData.Type == "stop" {
+
+				// remove entry from the hashmap
+				delete(streams, requestData.Data.(StreamerMetadata).UserId)
+
+			}
+
 		}
 	})
 
