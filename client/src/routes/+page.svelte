@@ -80,10 +80,10 @@
 
 			// Create MediaRecorder
 			mediaRecorder = new MediaRecorder(stream, {
-				mimeType: 'video/webm;codecs=vp8,opus',
-				bitsPerSecond: 128000,
-				audioBitsPerSecond: 64000,
-				videoBitsPerSecond: 128000
+				mimeType: 'video/webm',
+				bitsPerSecond: 2500000, // Increased bitrate
+				videoBitsPerSecond: 2000000,
+				audioBitsPerSecond: 500000
 			});
 
 			// Send chunks to server
@@ -95,7 +95,7 @@
 			};
 
 			// Start recording
-			mediaRecorder.start(100); // Create chunks every 1 second
+			mediaRecorder.start(200); // Create chunks every 1 second
 		} catch (err) {
 			console.log((err as Error).name);
 			let error = err as Error;
