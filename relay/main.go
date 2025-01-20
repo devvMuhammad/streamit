@@ -36,31 +36,30 @@ func main() {
 			return
 		}
 		defer wsConn.Close()
-		// Start FFmpeg process
+
+		// Start FFmpeg process with corrected parameters
 		ffmpegCmd := exec.Command("ffmpeg",
-			"-f", "webm",
 			"-i", "pipe:0",
 			"-c:v", "libx264",
-			"-preset", "medium",
+			"-preset", "ultrafast",
 			"-tune", "zerolatency",
+			"-profile:v", "baseline",
+			"-level", "3.0",
+			"-pix_fmt", "yuv420p",
+			"-r", "30",
+			"-g", "60",
 			"-c:a", "aac",
 			"-ar", "44100",
-			"-fflags", "nobuffer",
-			"-rtbufsize", "1500M",
 			"-b:a", "128k",
-			"-pix_fmt", "yuv420p",
+			"-b:v", "2500k",
+			"-maxrate", "2500k",
+			"-bufsize", "5000k",
 			"-f", "flv",
 			"rtmp://localhost/live/stream",
 		)
+
 		ffmpegCmd.Stderr = os.Stderr
-
 		ffmpegIn, err := ffmpegCmd.StdinPipe()
-
-		defer func() {
-			ffmpegIn.Close()
-			ffmpegCmd.Process.Kill()
-			ffmpegCmd.Wait()
-		}()
 
 		if err != nil {
 			log.Println("Failed creating pipe:", err)
@@ -72,7 +71,14 @@ func main() {
 			return
 		}
 
-		// Handle incoming WebSocket messages
+		defer func() {
+			ffmpegIn.Close()
+			if ffmpegCmd.Process != nil {
+				ffmpegCmd.Process.Kill()
+			}
+			ffmpegCmd.Wait()
+		}()
+
 		for {
 			messageType, data, err := wsConn.ReadMessage()
 			if err != nil {
@@ -80,21 +86,18 @@ func main() {
 				return
 			}
 
-			// Binary message means it is for streaming
 			if messageType == websocket.BinaryMessage {
 				if _, err := ffmpegIn.Write(data); err != nil {
 					log.Println("Pipe write error:", err)
-					wsConn.Close()
 					return
 				}
-
 				continue
 			}
 
-			// If not binary, assume it is a JSON message so unmarshal it
+			// Handle metadata messages
 			var requestData struct {
-				Type string      `json:"type"`
-				Data interface{} `json:"data"`
+				Type string           `json:"type"`
+				Data StreamerMetadata `json:"data"`
 			}
 
 			if err := json.Unmarshal(data, &requestData); err != nil {
@@ -102,20 +105,12 @@ func main() {
 				continue
 			}
 
-			if requestData.Type == "start" {
-
-				// add to the hashmap
-				streamerMetadata := requestData.Data.(StreamerMetadata)
-
-				streams[streamerMetadata.UserId] = streamerMetadata
-
-			} else if requestData.Type == "stop" {
-
-				// remove entry from the hashmap
-				delete(streams, requestData.Data.(StreamerMetadata).UserId)
-
+			switch requestData.Type {
+			case "start":
+				streams[requestData.Data.UserId] = requestData.Data
+			case "stop":
+				delete(streams, requestData.Data.UserId)
 			}
-
 		}
 	})
 
