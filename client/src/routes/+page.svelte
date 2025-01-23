@@ -57,26 +57,48 @@
 			// Setup WebSocket
 			socket = new WebSocket('ws://localhost:5000/ws');
 
+			// start the stream when connection is open
 			socket.onopen = () => {
+				// fetch user id from the session when we implement the auth
+				socket?.send(
+					JSON.stringify({
+						type: 'start',
+						data: {
+							channelName: 'dilshad' + Math.random(),
+							title: formData.title,
+							description: formData.description,
+							tags: ['gaming', 'learning']
+						}
+					})
+				);
 				isStreaming = true;
+			};
+
+			socket.onmessage = (e) => {
+				console.log('message from the server', e.data);
+				const data = JSON.parse(e.data) as { type: string; data: any };
+
+				switch (data.type) {
+					case 'stream-start':
+						// console.log('stream data', data.data);
+						if (data.data === 'start') {
+							streamErrors = undefined;
+							isStreaming = true;
+						} else {
+							streamErrors = 'An error occurred while starting the stream';
+						}
+						break;
+					case 'stop':
+						closeStream();
+						break;
+					default:
+						break;
+				}
 			};
 
 			socket.onclose = () => {
 				isStreaming = false;
 			};
-
-			// start the stream
-			// socket.send(
-			// 	JSON.stringify({
-			// 		type: 'start',
-			// 		data: {
-			// 			userId: Math.random().toString(36).substr(2, 9),
-			// 			title: 'Test Stream',
-			// 			description: 'This is a test stream',
-			// 			tags: ['test', 'stream']
-			// 		}
-			// 	})
-			// );
 
 			// Create MediaRecorder
 			mediaRecorder = new MediaRecorder(stream, {
@@ -88,9 +110,11 @@
 
 			// Send chunks to server
 			mediaRecorder.ondataavailable = (event) => {
+				// console.log(isStreaming);
 				if (event.data.size > 0 && socket?.readyState === WebSocket.OPEN) {
 					console.log('data to send', event.data);
-					socket?.send(event.data);
+					// socket?.send(JSON.stringify({ type: 'stream', data: event.data }));
+					socket.send(event.data);
 				}
 			};
 
@@ -179,7 +203,7 @@
 	{#if isStreaming}
 		<Button onclick={closeStream}>Close Stream</Button>
 		<a href="/streams/stream" target="_blank">
-			<Button onclick={startStream}>View Your Stream</Button>
+			<Button>View Your Stream</Button>
 		</a>
 	{/if}
 </div>
